@@ -356,7 +356,7 @@ class _DownloaderPageState extends State<DownloaderPage> {
     final url = extractSharedUrl(_urlController.text);
     final parsed = Uri.tryParse(url);
     if (parsed == null || !{'http', 'https'}.contains(parsed.scheme)) {
-      _show('请粘贴包含 B 站、抖音或视频号域名的分享内容。');
+      _show('没有识别到有效链接。请直接粘贴整段分享文案，或包含 v.douyin.com / b23.tv 的内容。');
       return;
     }
     setState(() {

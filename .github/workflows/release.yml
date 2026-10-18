@@ -26,13 +26,14 @@ jobs:
           Copy-Item resources/* build/windows/x64/runner/Release/data/flutter_assets/resources -Force
       - name: Package Windows app
         shell: pwsh
-        run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath public-video-downloader-windows.zip
+        run: |
+          New-Item -ItemType Directory -Force -Path release-assets/windows | Out-Null
+          Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath release-assets/windows/public-video-downloader-windows.zip
+          Copy-Item build/windows/x64/runner/Release/public_video_downloader.exe release-assets/windows/public_video_downloader.exe
       - uses: actions/upload-artifact@v4
         with:
           name: windows-release
-          path: |
-            public-video-downloader-windows.zip
-            build/windows/x64/runner/Release/public_video_downloader.exe
+          path: release-assets/windows
 
   android:
     runs-on: ubuntu-latest
@@ -45,10 +46,14 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter build apk --release
+      - name: Prepare Android release asset
+        run: |
+          mkdir -p release-assets/android
+          cp build/app/outputs/flutter-apk/app-release.apk release-assets/android/public-video-downloader-android.apk
       - uses: actions/upload-artifact@v4
         with:
           name: android-release
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: release-assets/android
 
   publish:
     needs: [windows, android]
@@ -65,4 +70,4 @@ jobs:
           files: |
             release-assets/windows-release/public-video-downloader-windows.zip
             release-assets/windows-release/public_video_downloader.exe
-            release-assets/android-release/app-release.apk
+            release-assets/android-release/public-video-downloader-android.apk
