@@ -19,6 +19,11 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter build windows --release
+      - name: Add Windows runtime resources
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path build/windows/x64/runner/Release/data/flutter_assets/resources | Out-Null
+          Copy-Item resources/* build/windows/x64/runner/Release/data/flutter_assets/resources -Force
       - name: Package Windows app
         shell: pwsh
         run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath public_video_downloader-windows.zip

@@ -68,6 +68,8 @@ flutter build windows --release
 
 仓库中的 `.github/workflows/windows.yml` 会在推送到 `main` 分支后自动检查代码、构建 Windows Release，并上传 ZIP 构建产物。FFmpeg 和 yt-dlp 通过 Git LFS 管理，克隆仓库时需要安装 Git LFS。
 
+推送 `v*` 标签（例如 `v1.0.1`）会触发 `.github/workflows/release.yml`，自动构建并发布 Android APK、Windows ZIP 和 Windows EXE 到 GitHub Releases。
+
 ## 许可
 
 应用代码使用 MIT 许可。`resources\ffmpeg.exe` 遵循 FFmpeg 自身许可，许可文本见 `resources\FFMPEG-LICENSE.txt`；`resources\yt-dlp.exe` 遵循 yt-dlp 项目许可。
