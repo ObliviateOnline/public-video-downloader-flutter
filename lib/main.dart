@@ -70,7 +70,7 @@ class VideoInfo {
       ));
     }
     formats.add(const QualityOption(
-      label: '最佳单文件（兼容模式）',
+      label: '兼容模式：最佳单文件（不需要 FFmpeg）',
       selector: 'best',
     ));
     return VideoInfo(
@@ -664,6 +664,11 @@ class _DownloaderPageState extends State<DownloaderPage> {
                       return DropdownMenuItem(value: item, child: Text(item.label));
                     }).toList(),
                     onChanged: _busy ? null : (value) => setState(() => _quality = value),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    '高画质选项会合并独立音视频；选择“兼容模式”时优先使用平台提供的单文件视频。',
+                    style: TextStyle(fontSize: 12, color: Colors.black54),
                   ),
                   const Spacer(),
                   SizedBox(
