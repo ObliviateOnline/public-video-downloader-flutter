@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'link_utils.dart';
 
@@ -112,6 +113,118 @@ class DownloadService {
 
   Future<String> _ytDlpPath() => _resourcePath('yt-dlp.exe');
 
+  Future<String> prepareDouyinCookies(String url) async {
+    if (!Platform.isWindows) throw StateError('自动获取抖音会话仅支持 Windows。');
+    final edge = await _findEdge();
+    final profile = await Directory.systemTemp.createTemp('public-video-edge-');
+    final port = 9340 + DateTime.now().millisecondsSinceEpoch % 500;
+    final edgeProcess = await Process.start(edge, [
+      '--headless=new',
+      '--disable-gpu',
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--disable-extensions',
+      '--remote-debugging-address=127.0.0.1',
+      '--remote-debugging-port=$port',
+      '--user-data-dir=${profile.path}',
+      url,
+    ], runInShell: false);
+    WebSocketChannel? channel;
+    try {
+      // /json/version is the browser-level socket. Page and Network commands
+      // must use the socket belonging to an actual page target.
+      final websocketUrl = await _findPageWebSocket(port);
+      if (websocketUrl == null) throw StateError('临时浏览器会话启动失败。');
+      channel = WebSocketChannel.connect(Uri.parse(websocketUrl));
+      await channel.ready;
+      var nextId = 0;
+      var cookiesId = -1;
+      final cookiesCompleter = Completer<List<dynamic>>();
+      channel.stream.listen((message) {
+        try {
+          final text = message is String ? message : utf8.decode(message as List<int>);
+          final data = jsonDecode(text) as Map<String, dynamic>;
+          final result = data['result'];
+          if (data['error'] is Map<String, dynamic> && !cookiesCompleter.isCompleted) {
+            cookiesCompleter.completeError(StateError('临时浏览器返回 CDP 错误。'));
+            return;
+          }
+          if (data['id'] == cookiesId && !cookiesCompleter.isCompleted) {
+            final payload = result as Map<String, dynamic>?;
+            cookiesCompleter.complete(payload?['cookies'] as List<dynamic>? ?? const []);
+          }
+        } catch (_) {}
+      });
+      channel.sink.add(jsonEncode({'id': ++nextId, 'method': 'Network.enable'}));
+      channel.sink.add(jsonEncode({'id': ++nextId, 'method': 'Page.navigate', 'params': {'url': url}}));
+      await Future<void>.delayed(const Duration(seconds: 6));
+      cookiesId = ++nextId;
+      channel.sink.add(jsonEncode({'id': cookiesId, 'method': 'Network.getAllCookies'}));
+      final cookies = await cookiesCompleter.future.timeout(const Duration(seconds: 12));
+      if (cookies.isEmpty) throw StateError('临时浏览器没有获取到抖音 Cookie。');
+      final cookieFile = File('${profile.path}\\cookies.txt');
+      await cookieFile.writeAsString(_netscapeCookies(cookies));
+      return cookieFile.path;
+    } finally {
+      await channel?.sink.close();
+      edgeProcess.kill();
+      await edgeProcess.exitCode;
+    }
+  }
+
+  Future<String?> _findPageWebSocket(int port) async {
+    for (var attempt = 0; attempt < 30; attempt++) {
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      try {
+        final response = await http.get(Uri.parse('http://127.0.0.1:$port/json/list'));
+        if (response.statusCode != 200) continue;
+        final targets = jsonDecode(response.body);
+        if (targets is! List) continue;
+        for (final target in targets) {
+          if (target is Map<String, dynamic> && target['type'] == 'page') {
+            final value = target['webSocketDebuggerUrl'];
+            if (value is String && value.isNotEmpty) return value;
+          }
+        }
+      } catch (_) {}
+    }
+    return null;
+  }
+
+  Future<String> _findEdge() async {
+    const candidates = [
+      r'C:\Program Files\Microsoft\Edge\Application\msedge.exe',
+      r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',
+    ];
+    for (final path in candidates) {
+      if (await File(path).exists()) return path;
+    }
+    final result = await Process.run('where.exe', ['msedge.exe']);
+    final path = result.stdout.toString().split(RegExp(r'\r?\n')).firstWhere(
+      (line) => line.trim().isNotEmpty,
+      orElse: () => '',
+    ).trim();
+    if (path.isNotEmpty && await File(path).exists()) return path;
+    throw StateError('找不到 Microsoft Edge，无法自动获取抖音会话。');
+  }
+
+  String _netscapeCookies(List<dynamic> cookies) {
+    final lines = <String>['# Netscape HTTP Cookie File'];
+    for (final item in cookies) {
+      if (item is! Map<String, dynamic>) continue;
+      final domain = (item['domain'] ?? '').toString();
+      final path = (item['path'] ?? '/').toString();
+      final secure = item['secure'] == true ? 'TRUE' : 'FALSE';
+      final expires = ((item['expires'] as num?)?.toInt() ?? 0).toString();
+      final name = (item['name'] ?? '').toString();
+      final value = (item['value'] ?? '').toString();
+      if (domain.isNotEmpty && name.isNotEmpty) {
+        lines.add('$domain\tTRUE\t$path\t$secure\t$expires\t$name\t$value');
+      }
+    }
+    return '${lines.join('\n')}\n';
+  }
+
   Future<VideoInfo> inspect(String url, {String? browser, String? cookiesFile, String? serverUrl}) async {
     if (isMobile) return _inspectRemote(url, serverUrl);
     final executable = await _ytDlpPath();
@@ -123,7 +236,7 @@ class DownloadService {
     ];
     if (cookiesFile != null && cookiesFile.isNotEmpty) {
       args.addAll(['--cookies', cookiesFile]);
-    } else if (browser != null && browser.isNotEmpty) {
+    } else if (browser != null && browser.isNotEmpty && browser != 'auto') {
       args.addAll(['--cookies-from-browser', browser]);
     }
     args.add(url);
@@ -197,7 +310,7 @@ class DownloadService {
     ];
     if (cookiesFile != null && cookiesFile.isNotEmpty) {
       args.addAll(['--cookies', cookiesFile]);
-    } else if (browser != null && browser.isNotEmpty) {
+    } else if (browser != null && browser.isNotEmpty && browser != 'auto') {
       args.addAll(['--cookies-from-browser', browser]);
     }
     args.add(url);
@@ -330,8 +443,9 @@ class _DownloaderPageState extends State<DownloaderPage> {
   bool _busy = false;
   double _progress = 0;
   String _status = '就绪';
-  String _browser = '';
+  String _browser = 'auto';
   String _cookiesFile = '';
+  bool _cookiesFileManual = false;
 
   @override
   void initState() {
@@ -373,10 +487,22 @@ class _DownloaderPageState extends State<DownloaderPage> {
     });
     _addLog('开始解析：$url');
     try {
+      var cookiesFile = _cookiesFile;
+      if (Platform.isWindows && _isDouyinUrl(url) && !_cookiesFileManual && _browser == 'auto') {
+        _addLog('正在自动启动临时浏览器获取抖音会话……');
+        cookiesFile = await _service.prepareDouyinCookies(url);
+        if (mounted) {
+          setState(() {
+            _cookiesFile = cookiesFile;
+            _cookiesFileManual = false;
+          });
+        }
+        _addLog('已自动获取抖音会话。');
+      }
       final info = await _service.inspect(
         url,
         browser: _browser,
-        cookiesFile: _cookiesFile,
+        cookiesFile: cookiesFile,
         serverUrl: _serverController.text,
       );
       if (!mounted) return;
@@ -408,6 +534,7 @@ class _DownloaderPageState extends State<DownloaderPage> {
     if (path.isNotEmpty && mounted) {
       setState(() {
         _cookiesFile = path;
+        _cookiesFileManual = true;
         _browser = '';
       });
       _addLog('已选择 Cookie 文件（不会把 Cookie 写入日志）。');
@@ -496,6 +623,11 @@ class _DownloaderPageState extends State<DownloaderPage> {
     if (host.contains('douyin') || host.contains('iesdouyin')) return '抖音';
     if (host.contains('weixin.qq.com')) return '微信视频号（实验性）';
     return '自动识别站点';
+  }
+
+  bool _isDouyinUrl(String url) {
+    final host = Uri.tryParse(url)?.host.toLowerCase() ?? '';
+    return host.contains('douyin') || host.contains('iesdouyin');
   }
 
   @override
@@ -631,12 +763,19 @@ class _DownloaderPageState extends State<DownloaderPage> {
               prefixIcon: Icon(Icons.web),
             ),
             items: const [
+              DropdownMenuItem(value: 'auto', child: Text('自动获取（推荐）')),
               DropdownMenuItem(value: '', child: Text('不使用浏览器会话')),
               DropdownMenuItem(value: 'chrome', child: Text('Chrome')),
               DropdownMenuItem(value: 'edge', child: Text('Microsoft Edge')),
               DropdownMenuItem(value: 'firefox', child: Text('Firefox')),
             ],
-            onChanged: _busy ? null : (value) => setState(() => _browser = value ?? ''),
+            onChanged: _busy
+                ? null
+                : (value) => setState(() {
+                    _browser = value ?? '';
+                    _cookiesFile = '';
+                    _cookiesFileManual = false;
+                  }),
           );
     final cookieButton = OutlinedButton.icon(
       onPressed: _busy ? null : _chooseCookiesFile,
@@ -645,7 +784,9 @@ class _DownloaderPageState extends State<DownloaderPage> {
     );
     final note = Text(
       _cookiesFile.isEmpty
-          ? '浏览器必须完全退出；如果仍然报 Cookie 解密错误，请选择 cookies.txt。'
+          ? (_browser == 'auto'
+              ? '解析抖音时会自动启动临时 Edge 会话，不影响你正在使用的浏览器。'
+              : '浏览器必须完全退出；如果仍然报 Cookie 解密错误，请选择 cookies.txt。')
           : '当前优先使用 cookies.txt，已忽略浏览器会话。',
     );
     return Column(
