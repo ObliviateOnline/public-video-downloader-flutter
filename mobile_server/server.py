@@ -29,14 +29,19 @@ ALLOWED_HOSTS = (
     "weixin.qq.com",
 )
 FORMAT_PATTERN = re.compile(r"^[A-Za-z0-9*+./=<>:\[\]-]{1,240}$")
-URL_PATTERN = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
+URL_PATTERN = re.compile(
+    r"(?:https?://|(?:www\.)?(?:v\.douyin\.com|douyin\.com|iesdouyin\.com|"
+    r"bilibili\.com|b23\.tv|weixin\.qq\.com)/)[^\s<>\"']+",
+    re.IGNORECASE,
+)
 
 
 def normalize_url(value: str) -> str:
     match = URL_PATTERN.search(html.unescape(value).strip())
     if not match:
         return ""
-    return match.group(0).rstrip("，。；、）】》>.,;:!?)]}")
+    url = match.group(0).rstrip("，。；、）】》>.,;:!?)]}")
+    return url if re.match(r"https?://", url, re.IGNORECASE) else f"https://{url}"
 
 
 def validate_url(value: str) -> str:

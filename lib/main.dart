@@ -7,6 +7,8 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
+import 'link_utils.dart';
+
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const VideoDownloaderApp());
@@ -351,10 +353,10 @@ class _DownloaderPageState extends State<DownloaderPage> {
   }
 
   Future<void> _inspect() async {
-    final url = _normalizeVideoUrl(_urlController.text);
+    final url = extractSharedUrl(_urlController.text);
     final parsed = Uri.tryParse(url);
     if (parsed == null || !{'http', 'https'}.contains(parsed.scheme)) {
-      _show('请输入以 http:// 或 https:// 开头的链接。');
+      _show('请粘贴包含 B 站、抖音或视频号域名的分享内容。');
       return;
     }
     setState(() {
@@ -394,7 +396,7 @@ class _DownloaderPageState extends State<DownloaderPage> {
   Future<void> _download() async {
     final info = _info;
     final quality = _quality;
-    final url = _normalizeVideoUrl(_urlController.text);
+    final url = extractSharedUrl(_urlController.text);
     final directory = _directoryController.text.trim();
     if (info == null || quality == null || directory.isEmpty) return;
     if (Platform.isWindows) {
@@ -472,12 +474,6 @@ class _DownloaderPageState extends State<DownloaderPage> {
     if (host.contains('douyin') || host.contains('iesdouyin')) return '抖音';
     if (host.contains('weixin.qq.com')) return '微信视频号（实验性）';
     return '自动识别站点';
-  }
-
-  String _normalizeVideoUrl(String input) {
-    final match = RegExp(r'''https?://[^\s<>"']+''', caseSensitive: false).firstMatch(input);
-    if (match == null) return input.trim();
-    return match.group(0)!.replaceFirst(RegExp(r'[，。；、）】》>.,;:!?\)\]}]+$'), '');
   }
 
   @override
@@ -569,7 +565,7 @@ class _DownloaderPageState extends State<DownloaderPage> {
       onSubmitted: (_) => _inspect(),
       decoration: InputDecoration(
         labelText: '视频链接',
-        hintText: '粘贴 B 站、抖音等公开视频链接',
+        hintText: '粘贴分享文字或 B 站、抖音视频链接',
         prefixIcon: const Icon(Icons.link),
         suffixText: _platform(_urlController.text),
       ),
