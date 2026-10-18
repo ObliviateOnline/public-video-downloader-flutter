@@ -24,10 +24,19 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path build/windows/x64/runner/Release/data/flutter_assets/resources | Out-Null
           Copy-Item resources/* build/windows/x64/runner/Release/data/flutter_assets/resources -Force
+      - uses: ilammy/setup-inno-setup@v2
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          $version = (Select-String '^version:' pubspec.yaml).Line.Split(':')[1].Trim().Split('+')[0]
+          New-Item -ItemType Directory -Force -Path release-assets/windows | Out-Null
+          iscc "/DMyAppVersion=$version" "/Orelease-assets/windows" "installer\public_video_downloader.iss"
       - name: Package Windows app
         shell: pwsh
-        run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath public_video_downloader-windows.zip
+        run: |
+          New-Item -ItemType Directory -Force -Path release-assets/windows | Out-Null
+          Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath release-assets/windows/public-video-downloader-windows.zip
       - uses: actions/upload-artifact@v4
         with:
           name: public-video-downloader-windows
-          path: public_video_downloader-windows.zip
+          path: release-assets/windows

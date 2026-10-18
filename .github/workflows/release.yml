@@ -24,6 +24,13 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path build/windows/x64/runner/Release/data/flutter_assets/resources | Out-Null
           Copy-Item resources/* build/windows/x64/runner/Release/data/flutter_assets/resources -Force
+      - uses: ilammy/setup-inno-setup@v2
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart('v')
+          New-Item -ItemType Directory -Force -Path release-assets/windows | Out-Null
+          iscc "/DMyAppVersion=$version" "/Orelease-assets/windows" "installer\public_video_downloader.iss"
       - name: Package Windows app
         shell: pwsh
         run: |
@@ -70,4 +77,5 @@ jobs:
           files: |
             release-assets/windows-release/public-video-downloader-windows.zip
             release-assets/windows-release/public_video_downloader.exe
+            release-assets/windows-release/public-video-downloader-setup-*.exe
             release-assets/android-release/public-video-downloader-android.apk

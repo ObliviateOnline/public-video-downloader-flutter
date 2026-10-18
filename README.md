@@ -13,6 +13,7 @@
 - 可选读取本机 Chrome、Edge 或 Firefox 的浏览器会话，用于抖音需要新鲜 Cookie 的链接
 - Android/iOS 共用 Flutter 界面，下载完成后调起系统分享/保存面板
 - Windows 同时提供高画质合并模式和单文件兼容模式
+- Windows 提供安装包，会自动安装完整运行文件并创建快捷方式
 - 微信视频号标记为实验性：当前 yt-dlp 没有稳定的视频号专用解析器，公开分享链接可能无法解析
 
 只处理公开且用户有权保存的内容。视频号、需要登录、付费、DRM、验证码或平台安全限制的链接，取决于平台当前允许的公开访问能力。
@@ -68,7 +69,7 @@ flutter build windows --release
 
 仓库中的 `.github/workflows/windows.yml` 会在推送到 `main` 分支后自动检查代码、构建 Windows Release，并上传 ZIP 构建产物。FFmpeg 和 yt-dlp 通过 Git LFS 管理，克隆仓库时需要安装 Git LFS。
 
-推送 `v*` 标签（例如 `v1.0.2`）会触发 `.github/workflows/release.yml`，自动构建并发布 Android APK、Windows ZIP 和 Windows EXE 到 GitHub Releases。当前发布版本为 `v1.0.1`。
+推送 `v*` 标签（例如 `v1.0.2`）会触发 `.github/workflows/release.yml`，自动构建并发布 Android APK、Windows 安装包、Windows ZIP 和 Windows EXE 到 GitHub Releases。安装包会把 `data`、`flutter_windows.dll`、FFmpeg 和 yt-dlp 一起安装，用户不需要手动整理文件。当前发布版本为 `v1.0.1`。
 
 ## 许可
 
