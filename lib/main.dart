@@ -105,15 +105,19 @@ class DownloadService {
 
   Future<String> _ytDlpPath() => _resourcePath('yt-dlp.exe');
 
-  Future<VideoInfo> inspect(String url) async {
+  Future<VideoInfo> inspect(String url, {String? browser}) async {
     final executable = await _ytDlpPath();
-    final result = await Process.run(executable, [
+    final args = <String>[
       '--dump-single-json',
       '--no-playlist',
       '--no-warnings',
       '--windows-filenames',
-      url,
-    ], runInShell: false);
+    ];
+    if (browser != null && browser.isNotEmpty) {
+      args.addAll(['--cookies-from-browser', browser]);
+    }
+    args.add(url);
+    final result = await Process.run(executable, args, runInShell: false);
     if (result.exitCode != 0) {
       throw Exception(_cleanProcessError(result.stderr.toString()));
     }
@@ -130,6 +134,7 @@ class DownloadService {
     required String url,
     required QualityOption quality,
     required String directory,
+    String? browser,
     required void Function(double progress, String message) onProgress,
     required void Function(String line) onLog,
   }) async {
@@ -153,8 +158,11 @@ class DownloadService {
       ffmpeg,
       '--output',
       output,
-      url,
     ];
+    if (browser != null && browser.isNotEmpty) {
+      args.addAll(['--cookies-from-browser', browser]);
+    }
+    args.add(url);
     _process = await Process.start(executable, args, runInShell: false);
     final stdout = _process!.stdout.transform(utf8.decoder).transform(const LineSplitter());
     final stderr = _process!.stderr.transform(utf8.decoder).transform(const LineSplitter());
@@ -194,6 +202,20 @@ class DownloadService {
   }
 }
 
+String _friendlyError(Object error) {
+  final message = error.toString();
+  if (message.contains('Fresh cookies')) {
+    return '抖音需要新鲜的浏览器会话。请先在浏览器打开该视频，再关闭浏览器，选择对应浏览器会话后重新解析。';
+  }
+  if (message.contains('Failed to decrypt with DPAPI')) {
+    return '浏览器 Cookie 解密失败。请关闭 Chrome/Edge 后重试，并确认软件和浏览器使用的是同一个 Windows 用户。';
+  }
+  if (message.contains('Could not copy Chrome cookie database')) {
+    return '浏览器 Cookie 数据库正在被占用。请完全关闭 Chrome/Edge（包括后台进程）后重新解析。';
+  }
+  return message;
+}
+
 class DownloaderPage extends StatefulWidget {
   const DownloaderPage({super.key});
 
@@ -211,6 +233,7 @@ class _DownloaderPageState extends State<DownloaderPage> {
   bool _busy = false;
   double _progress = 0;
   String _status = '就绪';
+  String _browser = '';
 
   @override
   void initState() {
@@ -250,7 +273,7 @@ class _DownloaderPageState extends State<DownloaderPage> {
     });
     _addLog('开始解析：$url');
     try {
-      final info = await _service.inspect(url);
+      final info = await _service.inspect(url, browser: _browser);
       if (!mounted) return;
       setState(() {
         _info = info;
@@ -260,7 +283,7 @@ class _DownloaderPageState extends State<DownloaderPage> {
       });
       _addLog('解析成功：${info.title}');
     } catch (error) {
-      _setError('解析失败：$error');
+      _setError('解析失败：${_friendlyError(error)}');
     }
   }
 
@@ -290,6 +313,7 @@ class _DownloaderPageState extends State<DownloaderPage> {
         url: url,
         quality: quality,
         directory: directory,
+        browser: _browser,
         onProgress: (progress, message) {
           if (!mounted) return;
           setState(() {
@@ -307,7 +331,7 @@ class _DownloaderPageState extends State<DownloaderPage> {
         _show('视频已保存到：\n$directory');
       }
     } catch (error) {
-      _setError('下载失败：$error');
+      _setError('下载失败：${_friendlyError(error)}');
     }
   }
 
@@ -385,6 +409,8 @@ class _DownloaderPageState extends State<DownloaderPage> {
                     _buildUrlRow(),
                     const SizedBox(height: 14),
                     _buildDirectoryRow(),
+                    const SizedBox(height: 14),
+                    _buildBrowserRow(),
                     const SizedBox(height: 16),
                     Expanded(
                       child: Row(
@@ -452,6 +478,35 @@ class _DownloaderPageState extends State<DownloaderPage> {
           onPressed: _busy ? null : _chooseDirectory,
           icon: const Icon(Icons.folder_open),
           label: const Text('选择目录'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBrowserRow() {
+    return Row(
+      children: [
+        Expanded(
+          child: DropdownButtonFormField<String>(
+            initialValue: _browser,
+            decoration: const InputDecoration(
+              labelText: '浏览器会话（抖音需要）',
+              prefixIcon: Icon(Icons.web),
+            ),
+            items: const [
+              DropdownMenuItem(value: '', child: Text('不使用浏览器会话')),
+              DropdownMenuItem(value: 'chrome', child: Text('Chrome')),
+              DropdownMenuItem(value: 'edge', child: Text('Microsoft Edge')),
+              DropdownMenuItem(value: 'firefox', child: Text('Firefox')),
+            ],
+            onChanged: _busy ? null : (value) => setState(() => _browser = value ?? ''),
+          ),
+        ),
+        const SizedBox(width: 12),
+        const Expanded(
+          child: Text(
+            '先在浏览器打开抖音视频，再完全关闭浏览器，然后选择对应浏览器。',
+          ),
         ),
       ],
     );
