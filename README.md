@@ -14,11 +14,12 @@
 - Android/iOS 共用 Flutter 界面，下载完成后调起系统分享/保存面板
 - Windows 同时提供高画质合并模式和单文件兼容模式
 - Windows 提供安装包，会自动安装完整运行文件并创建快捷方式
+- Windows 抖音支持浏览器会话和 `cookies.txt` 文件两种 Cookie 读取方式
 - 微信视频号标记为实验性：当前 yt-dlp 没有稳定的视频号专用解析器，公开分享链接可能无法解析
 
 只处理公开且用户有权保存的内容。视频号、需要登录、付费、DRM、验证码或平台安全限制的链接，取决于平台当前允许的公开访问能力。
 
-抖音目前经常要求新鲜浏览器会话。使用时先在浏览器中打开目标视频，确认页面可以正常播放，然后完全关闭浏览器（包括后台进程），在应用中选择对应浏览器后再解析。应用只在用户主动选择时读取本机浏览器会话，不上传 Cookie。
+抖音目前经常要求新鲜浏览器会话。使用时先在浏览器中打开目标视频，确认页面可以正常播放，然后完全关闭浏览器（包括后台进程），在应用中选择对应浏览器后再解析。如果浏览器 Cookie 解密失败，可以在应用中选择 Netscape 格式的 `cookies.txt` 文件；Cookie 文件只在本机使用，不要分享给别人。
 
 Windows 下载画质中，带“音视频合并”的选项会使用应用内置 FFmpeg；“兼容模式：最佳单文件”直接选择平台提供的单文件视频，不需要 FFmpeg，适合遇到合并失败或只需要普通 MP4 的情况。
 
@@ -69,7 +70,7 @@ flutter build windows --release
 
 仓库中的 `.github/workflows/windows.yml` 会在推送到 `main` 分支后自动检查代码、构建 Windows Release，并上传 ZIP 构建产物。FFmpeg 和 yt-dlp 通过 Git LFS 管理，克隆仓库时需要安装 Git LFS。
 
-推送 `v*` 标签（例如 `v1.0.4`）会触发 `.github/workflows/release.yml`，自动构建并发布 Android APK、Windows 安装包、Windows ZIP 和 Windows EXE 到 GitHub Releases。安装包会把 `data`、`flutter_windows.dll`、FFmpeg 和 yt-dlp 一起安装，用户不需要手动整理文件。当前发布版本为 `v1.0.4`。
+推送 `v*` 标签（例如 `v1.0.5`）会触发 `.github/workflows/release.yml`，自动构建并发布 Android APK、Windows 安装包、Windows ZIP 和 Windows EXE 到 GitHub Releases。安装包会把 `data`、`flutter_windows.dll`、FFmpeg 和 yt-dlp 一起安装，用户不需要手动整理文件。当前发布版本为 `v1.0.5`。
 
 ## 许可
 

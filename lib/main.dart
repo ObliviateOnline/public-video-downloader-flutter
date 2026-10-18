@@ -112,7 +112,7 @@ class DownloadService {
 
   Future<String> _ytDlpPath() => _resourcePath('yt-dlp.exe');
 
-  Future<VideoInfo> inspect(String url, {String? browser, String? serverUrl}) async {
+  Future<VideoInfo> inspect(String url, {String? browser, String? cookiesFile, String? serverUrl}) async {
     if (isMobile) return _inspectRemote(url, serverUrl);
     final executable = await _ytDlpPath();
     final args = <String>[
@@ -121,7 +121,9 @@ class DownloadService {
       '--no-warnings',
       '--windows-filenames',
     ];
-    if (browser != null && browser.isNotEmpty) {
+    if (cookiesFile != null && cookiesFile.isNotEmpty) {
+      args.addAll(['--cookies', cookiesFile]);
+    } else if (browser != null && browser.isNotEmpty) {
       args.addAll(['--cookies-from-browser', browser]);
     }
     args.add(url);
@@ -156,6 +158,7 @@ class DownloadService {
     required QualityOption quality,
     required String directory,
     String? browser,
+    String? cookiesFile,
     String? serverUrl,
     required String suggestedName,
     required void Function(double progress, String message) onProgress,
@@ -192,7 +195,9 @@ class DownloadService {
       '--output',
       output,
     ];
-    if (browser != null && browser.isNotEmpty) {
+    if (cookiesFile != null && cookiesFile.isNotEmpty) {
+      args.addAll(['--cookies', cookiesFile]);
+    } else if (browser != null && browser.isNotEmpty) {
       args.addAll(['--cookies-from-browser', browser]);
     }
     args.add(url);
@@ -296,10 +301,10 @@ String _friendlyError(Object error) {
     return '抖音需要新鲜的浏览器会话。请先在浏览器打开该视频，再关闭浏览器，选择对应浏览器会话后重新解析。';
   }
   if (message.contains('Failed to decrypt with DPAPI')) {
-    return '浏览器 Cookie 解密失败。请关闭 Chrome/Edge 后重试，并确认软件和浏览器使用的是同一个 Windows 用户。';
+    return '浏览器 Cookie 解密失败。请完全退出浏览器后重试；如果仍失败，请选择导出的 cookies.txt 文件。';
   }
   if (message.contains('Could not copy Chrome cookie database')) {
-    return '浏览器 Cookie 数据库正在被占用。请完全关闭 Chrome/Edge（包括后台进程）后重新解析。';
+    return '浏览器仍在后台运行，Cookie 数据库无法读取。请完全退出 Chrome/Edge，或选择导出的 cookies.txt 文件。';
   }
   if (message.contains('微信视频号') || message.contains('WeChat')) {
     return '微信视频号目前没有稳定的 yt-dlp 专用解析器，这类分享链接可能暂时无法下载。';
@@ -326,6 +331,7 @@ class _DownloaderPageState extends State<DownloaderPage> {
   double _progress = 0;
   String _status = '就绪';
   String _browser = '';
+  String _cookiesFile = '';
 
   @override
   void initState() {
@@ -370,6 +376,7 @@ class _DownloaderPageState extends State<DownloaderPage> {
       final info = await _service.inspect(
         url,
         browser: _browser,
+        cookiesFile: _cookiesFile,
         serverUrl: _serverController.text,
       );
       if (!mounted) return;
@@ -391,6 +398,20 @@ class _DownloaderPageState extends State<DownloaderPage> {
     final result = await Process.run('powershell.exe', ['-NoProfile', '-Command', script]);
     final path = result.stdout.toString().trim();
     if (path.isNotEmpty) _directoryController.text = path;
+  }
+
+  Future<void> _chooseCookiesFile() async {
+    if (!Platform.isWindows) return;
+    const script = r'''Add-Type -AssemblyName System.Windows.Forms; $dialog = New-Object System.Windows.Forms.OpenFileDialog; $dialog.Title = '选择 cookies.txt'; $dialog.Filter = 'Cookie 文件 (*.txt)|*.txt|所有文件 (*.*)|*.*'; if ($dialog.ShowDialog() -eq 'OK') { $dialog.FileName }''';
+    final result = await Process.run('powershell.exe', ['-NoProfile', '-Command', script]);
+    final path = result.stdout.toString().trim();
+    if (path.isNotEmpty && mounted) {
+      setState(() {
+        _cookiesFile = path;
+        _browser = '';
+      });
+      _addLog('已选择 Cookie 文件（不会把 Cookie 写入日志）。');
+    }
   }
 
   Future<void> _download() async {
@@ -415,6 +436,7 @@ class _DownloaderPageState extends State<DownloaderPage> {
         quality: quality,
         directory: directory,
         browser: _browser,
+        cookiesFile: _cookiesFile,
         serverUrl: _serverController.text,
         suggestedName: info.title,
         onProgress: (progress, message) {
@@ -602,10 +624,7 @@ class _DownloaderPageState extends State<DownloaderPage> {
   }
 
   Widget _buildBrowserRow() {
-    return Row(
-      children: [
-        Expanded(
-          child: DropdownButtonFormField<String>(
+    final browserPicker = DropdownButtonFormField<String>(
             initialValue: _browser,
             decoration: const InputDecoration(
               labelText: '浏览器会话（抖音需要）',
@@ -618,14 +637,23 @@ class _DownloaderPageState extends State<DownloaderPage> {
               DropdownMenuItem(value: 'firefox', child: Text('Firefox')),
             ],
             onChanged: _busy ? null : (value) => setState(() => _browser = value ?? ''),
-          ),
-        ),
-        const SizedBox(width: 12),
-        const Expanded(
-          child: Text(
-            '先在浏览器打开抖音视频，再完全关闭浏览器，然后选择对应浏览器。',
-          ),
-        ),
+          );
+    final cookieButton = OutlinedButton.icon(
+      onPressed: _busy ? null : _chooseCookiesFile,
+      icon: const Icon(Icons.key_outlined),
+      label: Text(_cookiesFile.isEmpty ? '选择 cookies.txt' : '已选择 Cookie 文件'),
+    );
+    final note = Text(
+      _cookiesFile.isEmpty
+          ? '浏览器必须完全退出；如果仍然报 Cookie 解密错误，请选择 cookies.txt。'
+          : '当前优先使用 cookies.txt，已忽略浏览器会话。',
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(children: [Expanded(child: browserPicker), const SizedBox(width: 10), cookieButton]),
+        const SizedBox(height: 5),
+        note,
       ],
     );
   }
