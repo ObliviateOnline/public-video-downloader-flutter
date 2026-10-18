@@ -12,6 +12,7 @@
 - 可选读取本机 Chrome、Edge 或 Firefox 的浏览器会话，用于抖音需要新鲜 Cookie 的链接
 - Android/iOS 共用 Flutter 界面，下载完成后调起系统分享/保存面板
 - Windows 同时提供高画质合并模式和单文件兼容模式
+- 微信视频号标记为实验性：当前 yt-dlp 没有稳定的视频号专用解析器，公开分享链接可能无法解析
 
 只处理公开且用户有权保存的内容。视频号、需要登录、付费、DRM、验证码或平台安全限制的链接，取决于平台当前允许的公开访问能力。
 
@@ -21,7 +22,9 @@ Windows 下载画质中，带“音视频合并”的选项会使用应用内置
 
 ## Android 和 iOS
 
-移动系统不能直接执行 Windows 的 `yt-dlp.exe` 和 FFmpeg。请先在电脑或服务器运行 `mobile_server/server.py`，再在手机应用中填写服务地址。手机与电脑在同一 Wi-Fi 时，可填写电脑局域网地址，例如 `http://192.168.1.20:8000`；正式部署应使用 HTTPS 和身份验证。
+移动系统不能直接执行 Windows 的 `yt-dlp.exe` 和 FFmpeg。请先在电脑或服务器运行 `mobile_server/server.py`，再在手机应用中填写服务地址。手机与电脑在同一 Wi-Fi 时，可填写电脑局域网地址，例如 `http://192.168.1.20:8000`；正式部署应使用 HTTPS 和身份验证。服务端和 Windows 一样依赖 yt-dlp 当前的站点解析能力，不能保证微信视频号分享链接可用。
+
+服务端会自动从带说明文字的分享内容中提取 URL，只接受 B 站、抖音和微信视频号域名，并为每个下载任务使用独立临时目录，避免多个手机任务拿到错误文件。抖音可以在服务端电脑上通过 `DOWNLOADER_BROWSER=chrome` 或 `DOWNLOADER_BROWSER=edge` 复用本机浏览器会话。
 
 ```powershell
 cd mobile_server

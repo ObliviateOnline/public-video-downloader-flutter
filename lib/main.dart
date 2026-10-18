@@ -299,6 +299,9 @@ String _friendlyError(Object error) {
   if (message.contains('Could not copy Chrome cookie database')) {
     return '浏览器 Cookie 数据库正在被占用。请完全关闭 Chrome/Edge（包括后台进程）后重新解析。';
   }
+  if (message.contains('微信视频号') || message.contains('WeChat')) {
+    return '微信视频号目前没有稳定的 yt-dlp 专用解析器，这类分享链接可能暂时无法下载。';
+  }
   return message;
 }
 
@@ -348,7 +351,7 @@ class _DownloaderPageState extends State<DownloaderPage> {
   }
 
   Future<void> _inspect() async {
-    final url = _urlController.text.trim();
+    final url = _normalizeVideoUrl(_urlController.text);
     final parsed = Uri.tryParse(url);
     if (parsed == null || !{'http', 'https'}.contains(parsed.scheme)) {
       _show('请输入以 http:// 或 https:// 开头的链接。');
@@ -391,7 +394,7 @@ class _DownloaderPageState extends State<DownloaderPage> {
   Future<void> _download() async {
     final info = _info;
     final quality = _quality;
-    final url = _urlController.text.trim();
+    final url = _normalizeVideoUrl(_urlController.text);
     final directory = _directoryController.text.trim();
     if (info == null || quality == null || directory.isEmpty) return;
     if (Platform.isWindows) {
@@ -467,8 +470,14 @@ class _DownloaderPageState extends State<DownloaderPage> {
     final host = Uri.tryParse(url)?.host.toLowerCase() ?? '';
     if (host.contains('bilibili') || host.endsWith('b23.tv')) return '哔哩哔哩';
     if (host.contains('douyin') || host.contains('iesdouyin')) return '抖音';
-    if (host.contains('weixin.qq.com')) return '微信视频号';
+    if (host.contains('weixin.qq.com')) return '微信视频号（实验性）';
     return '自动识别站点';
+  }
+
+  String _normalizeVideoUrl(String input) {
+    final match = RegExp(r'''https?://[^\s<>"']+''', caseSensitive: false).firstMatch(input);
+    if (match == null) return input.trim();
+    return match.group(0)!.replaceFirst(RegExp(r'[，。；、）】》>.,;:!?\)\]}]+$'), '');
   }
 
   @override
