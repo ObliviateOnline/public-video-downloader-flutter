@@ -24,13 +24,11 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path build/windows/x64/runner/Release/data/flutter_assets/resources | Out-Null
           Copy-Item resources/* build/windows/x64/runner/Release/data/flutter_assets/resources -Force
-      - uses: ilammy/setup-innosetup@v2
       - name: Build Windows installer
-        shell: pwsh
-        run: |
-          $version = "${{ github.ref_name }}".TrimStart('v')
-          New-Item -ItemType Directory -Force -Path release-assets/windows | Out-Null
-          iscc "/DMyAppVersion=$version" "/Orelease-assets/windows" "installer\public_video_downloader.iss"
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
+        with:
+          path: installer/public_video_downloader.iss
+          options: /DMyAppVersion=1.0.4 /Orelease-assets/windows
       - name: Package Windows app
         shell: pwsh
         run: |
