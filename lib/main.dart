@@ -215,7 +215,9 @@ class DownloadService {
       final domain = (item['domain'] ?? '').toString();
       final path = (item['path'] ?? '/').toString();
       final secure = item['secure'] == true ? 'TRUE' : 'FALSE';
-      final expires = ((item['expires'] as num?)?.toInt() ?? 0).toString();
+      // CDP uses -1 for session cookies; Netscape format uses 0 instead.
+      final rawExpires = (item['expires'] as num?)?.toInt() ?? 0;
+      final expires = (rawExpires > 0 ? rawExpires : 0).toString();
       final name = (item['name'] ?? '').toString();
       final value = (item['value'] ?? '').toString();
       if (domain.isNotEmpty && name.isNotEmpty) {
@@ -780,14 +782,14 @@ class _DownloaderPageState extends State<DownloaderPage> {
     final cookieButton = OutlinedButton.icon(
       onPressed: _busy ? null : _chooseCookiesFile,
       icon: const Icon(Icons.key_outlined),
-      label: Text(_cookiesFile.isEmpty ? '选择 cookies.txt' : '已选择 Cookie 文件'),
+      label: Text(_cookiesFileManual ? '已选择 Cookie 文件' : '选择 cookies.txt'),
     );
     final note = Text(
-      _cookiesFile.isEmpty
-          ? (_browser == 'auto'
+      _cookiesFileManual
+          ? '当前优先使用手动选择的 cookies.txt，已忽略浏览器会话。'
+          : (_browser == 'auto'
               ? '解析抖音时会自动启动临时 Edge 会话，不影响你正在使用的浏览器。'
-              : '浏览器必须完全退出；如果仍然报 Cookie 解密错误，请选择 cookies.txt。')
-          : '当前优先使用 cookies.txt，已忽略浏览器会话。',
+              : '浏览器必须完全退出；如果仍然报 Cookie 解密错误，请选择 cookies.txt。'),
     );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

@@ -1,7 +1,7 @@
 name: public_video_downloader
 description: A Windows Flutter desktop app for downloading publicly accessible videos.
 publish_to: none
-version: 1.0.6+7
+version: 1.0.7+8
 
 environment:
   sdk: ">=3.5.0 <4.0.0"

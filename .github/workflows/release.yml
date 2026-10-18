@@ -28,7 +28,7 @@ jobs:
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
         with:
           path: installer/public_video_downloader.iss
-          options: /DMyAppVersion=1.0.6 /Orelease-assets/windows
+          options: /DMyAppVersion=1.0.7 /Orelease-assets/windows
       - name: Package Windows app
         shell: pwsh
         run: |
