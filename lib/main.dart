@@ -3,6 +3,9 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -90,6 +93,8 @@ class QualityOption {
 class DownloadService {
   Process? _process;
 
+  bool get isMobile => Platform.isAndroid || Platform.isIOS;
+
   Future<String> _resourcePath(String name) async {
     final executableDir = File(Platform.resolvedExecutable).parent.path;
     final candidates = <String>[
@@ -105,7 +110,8 @@ class DownloadService {
 
   Future<String> _ytDlpPath() => _resourcePath('yt-dlp.exe');
 
-  Future<VideoInfo> inspect(String url, {String? browser}) async {
+  Future<VideoInfo> inspect(String url, {String? browser, String? serverUrl}) async {
+    if (isMobile) return _inspectRemote(url, serverUrl);
     final executable = await _ytDlpPath();
     final args = <String>[
       '--dump-single-json',
@@ -130,14 +136,39 @@ class DownloadService {
     );
   }
 
-  Future<void> download({
+  Future<VideoInfo> _inspectRemote(String url, String? serverUrl) async {
+    final base = _normalizeServerUrl(serverUrl);
+    final response = await http.post(
+      Uri.parse('$base/api/info'),
+      headers: {'content-type': 'application/json'},
+      body: jsonEncode({'url': url}),
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(_cleanProcessError(response.body));
+    }
+    return VideoInfo.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  Future<String?> download({
     required String url,
     required QualityOption quality,
     required String directory,
     String? browser,
+    String? serverUrl,
+    required String suggestedName,
     required void Function(double progress, String message) onProgress,
     required void Function(String line) onLog,
   }) async {
+    if (isMobile) {
+      return _downloadRemote(
+        url: url,
+        quality: quality,
+        serverUrl: serverUrl,
+        suggestedName: suggestedName,
+        onProgress: onProgress,
+        onLog: onLog,
+      );
+    }
     final executable = await _ytDlpPath();
     final ffmpeg = await _resourcePath('ffmpeg.exe');
     final output = '$directory\\%(title).150s [%(id)s].%(ext)s';
@@ -185,6 +216,61 @@ class DownloadService {
     _process = null;
     if (exitCode != 0) throw Exception('下载失败（退出码 $exitCode）。');
     onProgress(1, '下载完成');
+    return null;
+  }
+
+  Future<String> _downloadRemote({
+    required String url,
+    required QualityOption quality,
+    required String? serverUrl,
+    required String suggestedName,
+    required void Function(double progress, String message) onProgress,
+    required void Function(String line) onLog,
+  }) async {
+    final base = _normalizeServerUrl(serverUrl);
+    final client = http.Client();
+    try {
+      onLog('正在请求下载服务……');
+      final request = http.Request('POST', Uri.parse('$base/api/download'))
+        ..headers['content-type'] = 'application/json'
+        ..body = jsonEncode({'url': url, 'format': quality.selector});
+      final response = await client.send(request);
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception(_cleanProcessError(await response.stream.bytesToString()));
+      }
+      final directory = await getApplicationDocumentsDirectory();
+      final file = File('${directory.path}/${_safeFileName(suggestedName)}.mp4');
+      final sink = file.openWrite();
+      var received = 0;
+      final total = response.contentLength ?? 0;
+      await for (final chunk in response.stream) {
+        sink.add(chunk);
+        received += chunk.length;
+        final progress = total > 0 ? received / total : 0.0;
+        onProgress(
+          progress,
+          total > 0 ? '保存到手机 ${(progress * 100).toStringAsFixed(1)}%' : '正在保存到手机……',
+        );
+      }
+      await sink.close();
+      onLog('文件已保存到应用文件目录：${file.path}');
+      onProgress(1, '下载完成');
+      return file.path;
+    } finally {
+      client.close();
+    }
+  }
+
+  String _normalizeServerUrl(String? value) {
+    final base = value?.trim() ?? '';
+    if (base.isEmpty) throw Exception('请先填写下载服务地址。');
+    return base.replaceFirst(RegExp(r'/+$'), '');
+  }
+
+  String _safeFileName(String value) {
+    final cleaned = value.replaceAll(RegExp(r'[\\/:*?"<>|\r\n]'), '_').trim();
+    if (cleaned.isEmpty) return 'video';
+    return cleaned.substring(0, cleaned.length > 100 ? 100 : cleaned.length);
   }
 
   Future<void> cancel() async {
@@ -226,6 +312,7 @@ class DownloaderPage extends StatefulWidget {
 class _DownloaderPageState extends State<DownloaderPage> {
   final _urlController = TextEditingController();
   final _directoryController = TextEditingController();
+  final _serverController = TextEditingController();
   final _service = DownloadService();
   final _logs = <String>[];
   VideoInfo? _info;
@@ -239,7 +326,8 @@ class _DownloaderPageState extends State<DownloaderPage> {
   void initState() {
     super.initState();
     final home = Platform.environment['USERPROFILE'] ?? '';
-    _directoryController.text = '$home\\Downloads';
+    _directoryController.text = Platform.isWindows ? '$home\\Downloads' : '下载到应用文件目录';
+    _serverController.text = Platform.isAndroid ? 'http://10.0.2.2:8000' : 'http://127.0.0.1:8000';
     _addLog('程序已启动。请粘贴公开视频链接。');
   }
 
@@ -247,6 +335,7 @@ class _DownloaderPageState extends State<DownloaderPage> {
   void dispose() {
     _urlController.dispose();
     _directoryController.dispose();
+    _serverController.dispose();
     super.dispose();
   }
 
@@ -273,7 +362,11 @@ class _DownloaderPageState extends State<DownloaderPage> {
     });
     _addLog('开始解析：$url');
     try {
-      final info = await _service.inspect(url, browser: _browser);
+      final info = await _service.inspect(
+        url,
+        browser: _browser,
+        serverUrl: _serverController.text,
+      );
       if (!mounted) return;
       setState(() {
         _info = info;
@@ -288,6 +381,7 @@ class _DownloaderPageState extends State<DownloaderPage> {
   }
 
   Future<void> _chooseDirectory() async {
+    if (!Platform.isWindows) return;
     final script = r'''Add-Type -AssemblyName System.Windows.Forms; $dialog = New-Object System.Windows.Forms.FolderBrowserDialog; $dialog.Description = '选择视频保存目录'; if ($dialog.ShowDialog() -eq 'OK') { $dialog.SelectedPath }''';
     final result = await Process.run('powershell.exe', ['-NoProfile', '-Command', script]);
     final path = result.stdout.toString().trim();
@@ -300,7 +394,9 @@ class _DownloaderPageState extends State<DownloaderPage> {
     final url = _urlController.text.trim();
     final directory = _directoryController.text.trim();
     if (info == null || quality == null || directory.isEmpty) return;
-    await Directory(directory).create(recursive: true);
+    if (Platform.isWindows) {
+      await Directory(directory).create(recursive: true);
+    }
     setState(() {
       _busy = true;
       _progress = 0;
@@ -309,11 +405,13 @@ class _DownloaderPageState extends State<DownloaderPage> {
     _addLog('开始下载：${quality.label}');
     _addLog('保存目录：$directory');
     try {
-      await _service.download(
+      final savedPath = await _service.download(
         url: url,
         quality: quality,
         directory: directory,
         browser: _browser,
+        serverUrl: _serverController.text,
+        suggestedName: info.title,
         onProgress: (progress, message) {
           if (!mounted) return;
           setState(() {
@@ -328,7 +426,12 @@ class _DownloaderPageState extends State<DownloaderPage> {
           _busy = false;
           _status = '下载完成';
         });
-        _show('视频已保存到：\n$directory');
+        if (savedPath != null && _service.isMobile) {
+          await SharePlus.instance.share(ShareParams(files: [XFile(savedPath)]));
+          _show('视频已下载，请在系统分享面板中保存或发送。');
+        } else {
+          _show('视频已保存到：\n$directory');
+        }
       }
     } catch (error) {
       _setError('下载失败：${_friendlyError(error)}');
@@ -371,11 +474,12 @@ class _DownloaderPageState extends State<DownloaderPage> {
   @override
   Widget build(BuildContext context) {
     final info = _info;
+    final compact = MediaQuery.sizeOf(context).width < 700;
     return Scaffold(
       body: SafeArea(
         child: Row(
           children: [
-            NavigationRail(
+            if (!compact) NavigationRail(
               selectedIndex: 0,
               labelType: NavigationRailLabelType.all,
               leading: const Padding(
@@ -395,33 +499,28 @@ class _DownloaderPageState extends State<DownloaderPage> {
                 ),
               ],
             ),
-            const VerticalDivider(width: 1),
+            if (!compact) const VerticalDivider(width: 1),
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(28, 24, 28, 20),
+                padding: EdgeInsets.fromLTRB(compact ? 14 : 28, 20, compact ? 14 : 28, 16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('公开视频下载器', style: Theme.of(context).textTheme.headlineSmall),
                     const SizedBox(height: 4),
-                    Text('Flutter Windows 版', style: Theme.of(context).textTheme.bodyMedium),
+                    Text(
+                      Platform.isWindows ? 'Flutter Windows 版' : 'Flutter 移动版',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
                     const SizedBox(height: 22),
                     _buildUrlRow(),
                     const SizedBox(height: 14),
                     _buildDirectoryRow(),
                     const SizedBox(height: 14),
-                    _buildBrowserRow(),
+                    if (Platform.isWindows) _buildBrowserRow(),
+                    if (!Platform.isWindows) _buildServerRow(),
                     const SizedBox(height: 16),
-                    Expanded(
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Expanded(flex: 5, child: _buildInfoCard(info)),
-                          const SizedBox(width: 16),
-                          Expanded(flex: 4, child: _buildLogCard()),
-                        ],
-                      ),
-                    ),
+                    Expanded(child: _buildCards(info)),
                     const SizedBox(height: 16),
                     _buildProgress(),
                   ],
@@ -434,53 +533,67 @@ class _DownloaderPageState extends State<DownloaderPage> {
     );
   }
 
-  Widget _buildUrlRow() {
+  Widget _buildCards(VideoInfo? info) {
+    if (MediaQuery.sizeOf(context).width < 700) {
+      return Column(
+        children: [
+          Expanded(flex: 5, child: _buildInfoCard(info)),
+          const SizedBox(height: 12),
+          Expanded(flex: 4, child: _buildLogCard()),
+        ],
+      );
+    }
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Expanded(
-          child: TextField(
-            controller: _urlController,
-            enabled: !_busy,
-            onSubmitted: (_) => _inspect(),
-            decoration: InputDecoration(
-              labelText: '视频链接',
-              hintText: '粘贴 B 站、抖音等公开视频链接',
-              prefixIcon: const Icon(Icons.link),
-              suffixText: _platform(_urlController.text),
-            ),
-          ),
-        ),
-        const SizedBox(width: 12),
-        FilledButton.icon(
-          onPressed: _busy ? null : _inspect,
-          icon: const Icon(Icons.search),
-          label: const Text('解析信息'),
-        ),
+        Expanded(flex: 5, child: _buildInfoCard(info)),
+        const SizedBox(width: 16),
+        Expanded(flex: 4, child: _buildLogCard()),
       ],
     );
   }
 
-  Widget _buildDirectoryRow() {
-    return Row(
-      children: [
-        Expanded(
-          child: TextField(
-            controller: _directoryController,
-            enabled: !_busy,
-            decoration: const InputDecoration(
-              labelText: '保存目录',
-              prefixIcon: Icon(Icons.folder_outlined),
-            ),
-          ),
-        ),
-        const SizedBox(width: 12),
-        OutlinedButton.icon(
-          onPressed: _busy ? null : _chooseDirectory,
-          icon: const Icon(Icons.folder_open),
-          label: const Text('选择目录'),
-        ),
-      ],
+  Widget _buildUrlRow() {
+    final field = TextField(
+      controller: _urlController,
+      enabled: !_busy,
+      onSubmitted: (_) => _inspect(),
+      decoration: InputDecoration(
+        labelText: '视频链接',
+        hintText: '粘贴 B 站、抖音等公开视频链接',
+        prefixIcon: const Icon(Icons.link),
+        suffixText: _platform(_urlController.text),
+      ),
     );
+    final button = FilledButton.icon(
+      onPressed: _busy ? null : _inspect,
+      icon: const Icon(Icons.search),
+      label: const Text('解析信息'),
+    );
+    if (MediaQuery.sizeOf(context).width < 700) {
+      return Column(children: [field, const SizedBox(height: 10), SizedBox(width: double.infinity, child: button)]);
+    }
+    return Row(children: [Expanded(child: field), const SizedBox(width: 12), button]);
+  }
+
+  Widget _buildDirectoryRow() {
+    final field = TextField(
+      controller: _directoryController,
+      enabled: !_busy && Platform.isWindows,
+      decoration: const InputDecoration(
+        labelText: '保存目录',
+        prefixIcon: Icon(Icons.folder_outlined),
+      ),
+    );
+    final button = OutlinedButton.icon(
+      onPressed: _busy || !Platform.isWindows ? null : _chooseDirectory,
+      icon: const Icon(Icons.folder_open),
+      label: const Text('选择目录'),
+    );
+    if (MediaQuery.sizeOf(context).width < 700) {
+      return Column(children: [field, if (Platform.isWindows) const SizedBox(height: 10), if (Platform.isWindows) SizedBox(width: double.infinity, child: button)]);
+    }
+    return Row(children: [Expanded(child: field), const SizedBox(width: 12), if (Platform.isWindows) button]);
   }
 
   Widget _buildBrowserRow() {
@@ -510,6 +623,23 @@ class _DownloaderPageState extends State<DownloaderPage> {
         ),
       ],
     );
+  }
+
+  Widget _buildServerRow() {
+    final field = TextField(
+      controller: _serverController,
+      enabled: !_busy,
+      decoration: const InputDecoration(
+        labelText: '下载服务地址',
+        prefixIcon: Icon(Icons.cloud_outlined),
+        hintText: '例如 http://192.168.1.20:8000',
+      ),
+    );
+    const note = Text('手机与电脑需在同一网络，或填写已部署的 HTTPS 服务地址。');
+    if (MediaQuery.sizeOf(context).width < 700) {
+      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [field, const SizedBox(height: 6), note]);
+    }
+    return Row(children: [Expanded(child: field), const SizedBox(width: 12), const Expanded(child: note)]);
   }
 
   Widget _buildInfoCard(VideoInfo? info) {
